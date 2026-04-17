@@ -1,49 +1,63 @@
-import pystray
+import sys
+import tempfile
+from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
+from PyQt6.QtGui import QIcon, QAction
 from PIL import Image, ImageDraw
 
 
-def create_image():
+def create_icon_path():
     width = 64
     height = 64
-    
     image = Image.new('RGB', (width, height), (255, 255, 255))
     draw = ImageDraw.Draw(image)
+    draw.ellipse((10, 20, 54, 60), fill=(100, 150, 255))
     
-    draw.ellipse((10, 20, 30, 40), fill=(100, 150, 255))
-    draw.ellipse((25, 15, 45, 35), fill=(120, 170, 255))
-    draw.ellipse((40, 20, 60, 40), fill=(100, 150, 255))
-    draw.rectangle((20, 35, 50, 45), fill=(100, 150, 255))
-    
-    return image
+    temp_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+    image.save(temp_file.name)
+    return temp_file.name
 
 
-def on_quit(icon, item):
-    icon.stop()
+def on_open():
+    print("Открыт Redisk")
 
 
-def on_open(icon, item):
-    print("Открыть папку")
+def on_notifications():
+    print("Уведомления отключены")
 
 
-def on_notifications(icon, item):
-    print("уведомление")
+def on_quit(tray_icon, app):
+    print("Программа закрыта")
+    tray_icon.hide()
+    app.quit()
 
 
 def run_tray():
-    menu = pystray.Menu(
-        pystray.MenuItem("Отключить уведомления", on_notifications),
-        pystray.MenuItem("Открыть Redisk", on_open),
-        pystray.MenuItem("Закрыть", on_quit)
-    )
+    app = QApplication(sys.argv)
+    icon_path = create_icon_path()
+    tray_icon = QSystemTrayIcon(QIcon(icon_path), parent=app)
     
-    icon = pystray.Icon(
-        name="discohack",
-        icon=create_image(),
-        title="DiscoHack",
-        menu=menu
-    )
+    menu = QMenu()
     
-    icon.run()
+    open_action = QAction("Открыть Redisk")
+    open_action.triggered.connect(on_open)
+    menu.addAction(open_action)
+    
+    notifications_action = QAction("Отключить уведомления")
+    notifications_action.triggered.connect(on_notifications)
+    menu.addAction(notifications_action)
+    
+    menu.addSeparator()
+    
+    quit_action = QAction("Закрыть")
+    quit_action.triggered.connect(lambda: on_quit(tray_icon, app))
+    menu.addAction(quit_action)
+
+    tray_icon.setContextMenu(menu)
+    tray_icon.show()
+    
+    tray_icon.showMessage("DiscoHack", "Программа запущена")
+    
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":
