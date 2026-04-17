@@ -1,4 +1,5 @@
-yadisk>=1.2.0
+vyadisk>=1.2.0
 webdavclient3>=3.14.0
 requests>=2.28.0
-pystray==0.19.5
+PyQt6>=6.5.0
+Pillow>=10.0.0
