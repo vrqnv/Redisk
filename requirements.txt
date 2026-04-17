@@ -1,3 +1,4 @@
 yadisk>=1.2.0
 webdavclient3>=3.14.0
 requests>=2.28.0
+pystray==0.19.5
