@@ -118,17 +118,29 @@ class RediskService:
         remote_path: str,
         local_dir: Path,
     ):
-        for item in self.api.list_dir(disk_id, remote_path):
+        try:
+            items = self.api.list_dir(disk_id, remote_path)
+        except Exception as exc:
+            print(f"Ошибка чтения директории {disk_id} {remote_path}: {exc}")
+            return
+
+        for item in items:
             name = item["name"]
             if not name:
                 continue
             if item["is_dir"]:
                 child_local = local_dir / name
                 child_local.mkdir(parents=True, exist_ok=True)
-                self._sync_dir_from_cloud(disk_id, item["path"], child_local)
+                try:
+                    self._sync_dir_from_cloud(disk_id, item["path"], child_local)
+                except Exception as exc:
+                    print(f"Ошибка синхронизации папки {item['path']}: {exc}")
             else:
                 target_file = local_dir / name
-                self.api.download_file(disk_id, item["path"], str(target_file))
+                try:
+                    self.api.download_file(disk_id, item["path"], str(target_file))
+                except Exception as exc:
+                    print(f"Ошибка синхронизации файла {item['path']}: {exc}")
 
     def _disk_and_relative_from_path(self, path: str):
         resolved = Path(path).resolve()
