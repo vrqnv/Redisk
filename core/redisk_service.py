@@ -61,7 +61,7 @@ class RediskService:
     def _save(self):
         save_config(self.config)
 
-    def connect_yandex(self, token: str) -> bool:
+    def connect_yandex(self, token: str, *, initial_sync: bool = True) -> bool:
         ok = self.api.connect_yandex(token)
         if not ok:
             return False
@@ -70,12 +70,16 @@ class RediskService:
         self.config["disks"]["yandex"]["enabled"] = True
         self._save()
         self.ensure_disk_local_dir("yandex")
-        try:
-            self.pull_from_cloud("yandex")
-        except Exception as exc:
-            # На демо важнее поднять tray и монтирование,
-            # чем падать из-за единичного проблемного файла.
-            print(f"Предупреждение: первичный sync Яндекс завершился с ошибкой: {exc}")
+        if initial_sync:
+            try:
+                self.pull_from_cloud("yandex")
+            except Exception as exc:
+                # На демо важнее поднять tray и монтирование,
+                # чем падать из-за единичного проблемного файла.
+                print(
+                    "Предупреждение: первичный sync Яндекс завершился с "
+                    f"ошибкой: {exc}",
+                )
         return True
 
     def connect_nextcloud(self, url: str, login: str, password: str) -> bool:
