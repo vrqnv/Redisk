@@ -4,6 +4,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import yadisk  # type: ignore[import-not-found]
+from yadisk.exceptions import WrongResourceTypeError  # type: ignore[import-not-found]
 from webdav3.client import Client as WebDAVClient  # type: ignore[import-untyped]
 
 class CloudAPI:
@@ -29,6 +30,21 @@ class CloudAPI:
         if not parent.startswith("/"):
             parent = "/" + parent
         return parent
+
+    @staticmethod
+    def _yandex_item_is_dir(item: Any) -> bool:
+        is_dir_attr = getattr(item, "is_dir", None)
+        if callable(is_dir_attr):
+            try:
+                return bool(is_dir_attr())
+            except Exception:
+                pass
+        if isinstance(is_dir_attr, bool):
+            return is_dir_attr
+        item_type = getattr(item, "type", None)
+        if isinstance(item_type, str):
+            return item_type.lower() == "dir"
+        return False
 
     def connect_yandex(self, token: str) -> bool:
         try:
@@ -74,12 +90,18 @@ class CloudAPI:
 
         if disk_id == "yandex" and self.yandex:
             result = []
-            for item in self.yandex.listdir(remote):
+            try:
+                items = self.yandex.listdir(remote)
+            except WrongResourceTypeError:
+                # Иногда API может вернуть путь к файлу там, где ожидалась папка.
+                # В таком случае считаем, что дочерних элементов нет.
+                return []
+            for item in items:
                 result.append(
                     {
                         "name": item.name,
                         "path": item.path.replace("disk:", "", 1),
-                        "is_dir": bool(item.is_dir),
+                        "is_dir": self._yandex_item_is_dir(item),
                     }
                 )
             return result
