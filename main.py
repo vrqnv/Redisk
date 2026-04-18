@@ -1,11 +1,10 @@
-from cloud.api import CloudAPI
+from core.redisk_service import RediskService
 from gui.tray import run_tray
 
 
 def main():
-    # Инициализируем API облаков на старте, чтобы сразу проверить конфиг.
-    CloudAPI()
-    run_tray()
+    service = RediskService()
+    run_tray(service)
 
 
 if __name__ == "__main__":
