@@ -106,28 +106,48 @@ class TrayController:
     def add_yandex_flow(self):
         cfg = load_config()
         oauth_cfg = cfg.setdefault("oauth", {}).setdefault("yandex", {})
-        client_id = oauth_cfg.get("client_id")
+        client_id = (
+            oauth_cfg.get("client_id")
+            or os.environ.get("DISCOHACK_YANDEX_CLIENT_ID")
+            or os.environ.get("YANDEX_CLIENT_ID")
+        )
         redirect_uri = oauth_cfg.get("redirect_uri") or "http://127.0.0.1:8085/callback"
         oauth_cfg["redirect_uri"] = redirect_uri
         save_config(cfg)
         if not client_id:
-            client_id, ok = QInputDialog.getText(
+            QMessageBox.critical(
                 None,
-                "Yandex OAuth",
-                "Введите client_id вашего приложения (oauth.yandex.com):",
+                "DiscoHack",
+                (
+                    "Не настроен Yandex OAuth client_id.\n\n"
+                    "Для сборки хакатона задайте его один раз:\n"
+                    "- в ~/.config/discohack/config.json (oauth.yandex.client_id)\n"
+                    "- или переменной окружения DISCOHACK_YANDEX_CLIENT_ID\n\n"
+                    "После этого кнопка откроет окно входа Яндекса."
+                ),
             )
-            if not ok or not client_id.strip():
-                return
-            oauth_cfg["client_id"] = client_id.strip()
-            save_config(cfg)
-            client_id = oauth_cfg["client_id"]
+            return
+        oauth_cfg["client_id"] = client_id
+        save_config(cfg)
 
         # Запускаем OAuth (PKCE) с локальным callback.
-        auth_url, _redirect_uri, verifier, result = yandex_start_oauth(
-            client_id=client_id,
-            scope=None,
-            redirect_uri=redirect_uri,
-        )
+        try:
+            auth_url, _redirect_uri, verifier, result = yandex_start_oauth(
+                client_id=client_id,
+                scope="cloud_api:disk.read cloud_api:disk.write cloud_api:disk.info",
+                redirect_uri=redirect_uri,
+            )
+        except OSError as exc:
+            QMessageBox.critical(
+                None,
+                "DiscoHack",
+                (
+                    "Не удалось запустить локальный callback-сервер для OAuth.\n\n"
+                    f"Проверьте, что порт из redirect_uri свободен ({redirect_uri}).\n"
+                    f"Ошибка: {exc}"
+                ),
+            )
+            return
         webbrowser.open(auth_url, new=2)
 
         # Ждём callback (до 3 минут). В идеале это вынести в thread,
