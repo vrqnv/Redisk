@@ -154,6 +154,17 @@ class CloudAPI:
         remote = self._normalize_remote_path(remote_path)
         try:
             os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            # После предыдущих неудачных синков на месте файла
+            # мог остаться каталог с таким же именем.
+            if os.path.isdir(local_path):
+                try:
+                    os.rmdir(local_path)
+                except OSError:
+                    print(
+                        f"Пропуск файла {disk_id} {remote}: "
+                        f"локальный путь уже занят каталогом {local_path}",
+                    )
+                    return False
             if disk_id == "yandex" and self.yandex:
                 self.yandex.download(remote, local_path)
                 return True
