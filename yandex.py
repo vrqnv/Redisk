@@ -1,6 +1,6 @@
-import requests
 import os
-import time
+import requests
+
 
 class YandexDisk:
     def __init__(self, token):
@@ -51,7 +51,7 @@ class YandexDisk:
                 if progress_callback and total_size:
                     progress_callback(downloaded, total_size)
 
-    def upload_file(self, local_path, remote_path, progress_callback=None):
+    def upload_file(self, local_path, remote_path):
         self._ensure_remote_parent_dirs(remote_path)
         url = f"{self.base_url}/resources/upload?path={remote_path}&overwrite=true"
         resp = requests.get(url, headers=self._headers())
@@ -62,40 +62,25 @@ class YandexDisk:
             r = requests.put(upload_url, data=f, stream=True)
             r.raise_for_status()
 
+    def upload_bytes(self, data: bytes, remote_path: str):
+        self._ensure_remote_parent_dirs(remote_path)
+        url = f"{self.base_url}/resources/upload?path={remote_path}&overwrite=true"
+        resp = requests.get(url, headers=self._headers())
+        resp.raise_for_status()
+        upload_url = resp.json()["href"]
+        r = requests.put(upload_url, data=data)
+        r.raise_for_status()
+
     def delete(self, remote_path, permanently=False):
         url = f"{self.base_url}/resources?path={remote_path}&permanently={str(permanently).lower()}"
         resp = requests.delete(url, headers=self._headers())
         resp.raise_for_status()
 
-    def move(self, from_path, to_path):
-        url = f"{self.base_url}/resources/move"
-        payload = {"from": from_path, "path": to_path, "overwrite": True}
-        resp = requests.post(url, headers=self._headers(), params=payload)
-        resp.raise_for_status()
-
     def create_dir(self, remote_path):
         url = f"{self.base_url}/resources?path={remote_path}"
         resp = requests.put(url, headers=self._headers())
-        # 201: created, 409: already exists
         if resp.status_code not in (201, 409):
             resp.raise_for_status()
-
-    def publish(self, remote_path):
-        url = f"{self.base_url}/resources/publish?path={remote_path}"
-        resp = requests.put(url, headers=self._headers())
-        resp.raise_for_status()
-        return resp.json().get("href")
-
-    def unpublish(self, remote_path):
-        url = f"{self.base_url}/resources/unpublish?path={remote_path}"
-        resp = requests.put(url, headers=self._headers())
-        return resp.status_code == 204
-
-    def get_meta(self, remote_path):
-        url = f"{self.base_url}/resources?path={remote_path}"
-        resp = requests.get(url, headers=self._headers())
-        resp.raise_for_status()
-        return resp.json()
 
     def get_preview(self, remote_path, size="150x150"):
         url = f"{self.base_url}/resources/download?path={remote_path}"
@@ -104,4 +89,3 @@ class YandexDisk:
         download_url = resp.json()["href"]
         preview_url = f"{download_url}&preview=true&size={size}"
         return preview_url
-        
