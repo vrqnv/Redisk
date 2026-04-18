@@ -1,3 +1,5 @@
+"""Config helpers for DiscoHack."""
+
 import json
 from pathlib import Path
 
@@ -14,7 +16,7 @@ def _default_config():
     return {
         "oauth": {
             "yandex": {
-                "client_id": "",
+                "client_id": "8ccbfa30fe5d4a68a3b4b1f4a8c34765",
                 "redirect_uri": "http://127.0.0.1:8085/callback",
             },
         },
@@ -35,7 +37,8 @@ def load_config():
         cfg = _default_config()
         save_config(cfg)
 
-    # Мягко домерживаем дефолты, чтобы обновления структуры не ломали старые конфиги.
+    # Мягко домерживаем дефолты,
+    # чтобы обновления структуры не ломали старые конфиги.
     defaults = _default_config()
     cfg.setdefault("oauth", {})
     cfg["oauth"].setdefault("yandex", {})
@@ -47,6 +50,11 @@ def load_config():
         "redirect_uri",
         defaults["oauth"]["yandex"]["redirect_uri"],
     )
+    if not cfg["oauth"]["yandex"].get("client_id"):
+        cfg["oauth"]["yandex"]["client_id"] = defaults["oauth"]["yandex"][
+            "client_id"
+        ]
+        save_config(cfg)
     cfg.setdefault("disks", {})
     cfg["disks"].setdefault("yandex", defaults["disks"]["yandex"])
     cfg["disks"].setdefault("nextcloud", defaults["disks"]["nextcloud"])
@@ -58,4 +66,3 @@ def save_config(config):
     config_file = get_config_dir() / "config.json"
     with open(config_file, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
-*** End of File

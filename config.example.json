@@ -1,7 +1,7 @@
 {
   "oauth": {
     "yandex": {
-      "client_id": "b0748f301b7d451799d3c79dc69fab25",
+      "client_id": "8ccbfa30fe5d4a68a3b4b1f4a8c34765",
       "redirect_uri": "http://127.0.0.1:8085/callback"
     }
   },
