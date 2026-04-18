@@ -1,8 +1,7 @@
-YANDEX_TOKEN = "y0__xDbvai_BRjvwUAg0Ob7jhcwsIjtlQjoc2WPFkscJYtt8rHWCc1SzQI60g"
+# Зарегистрируйте приложение на https://oauth.yandex.ru/
+# Тип авторизации: Implicit (token), redirect: https://oauth.yandex.ru/verification_code
+YANDEX_CLIENT_ID = ""
 
-#пока для тестов
-NEXTCLOUD_CONFIG = {
-    'url': 'https://demo.nextcloud.com/remote.php/dav/files/demo/',
-    'login': 'demo',
-    'password': 'demo'
-}
+# Оставьте пустыми — пользователь вводит через интерфейс
+YANDEX_TOKEN = ""
+NEXTCLOUD_CONFIG = {}

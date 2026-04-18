@@ -6,8 +6,6 @@ from urllib.parse import urlsplit
 import yadisk  # type: ignore[import-not-found]
 from webdav3.client import Client as WebDAVClient  # type: ignore[import-untyped]
 
-from cloud.config import NEXTCLOUD_CONFIG, YANDEX_TOKEN
-
 
 class CloudAPI:
     def __init__(self, config: dict | None = None):
@@ -15,20 +13,15 @@ class CloudAPI:
         self.nextcloud: Any | None = None
         self.config = config or {}
 
-        yandex_token = (
-            self.config.get("disks", {}).get("yandex", {}).get("token")
-            or YANDEX_TOKEN
-        )
-        nextcloud_cfg = (
-            self.config.get("disks", {}).get("nextcloud")
-            or NEXTCLOUD_CONFIG
-            or {}
-        )
+        disks = self.config.get("disks", {})
 
-        if yandex_token:
-            self.connect_yandex(yandex_token)
-        if nextcloud_cfg:
-            self.connect_nextcloud(nextcloud_cfg)
+        yandex_cfg = disks.get("yandex", {})
+        if yandex_cfg.get("enabled") and yandex_cfg.get("token"):
+            self.connect_yandex(yandex_cfg["token"])
+
+        nc_cfg = disks.get("nextcloud", {})
+        if nc_cfg.get("enabled") and nc_cfg.get("url"):
+            self.connect_nextcloud(nc_cfg)
 
     @staticmethod
     def _normalize_remote_path(path: str) -> str:
@@ -50,9 +43,11 @@ class CloudAPI:
             client = yadisk.YaDisk(token=token)
             if client.check_token():
                 self.yandex = client
+                print("Яндекс.Диск: подключён")
                 return True
+            print("Яндекс.Диск: токен недействителен")
         except Exception as exc:
-            print(f"Яндекс.Диск: ошибка - {exc}")
+            print(f"Яндекс.Диск: ошибка подключения — {exc}")
         self.yandex = None
         return False
 
@@ -71,11 +66,18 @@ class CloudAPI:
             )
             client.list("/")
             self.nextcloud = client
+            print("NextCloud: подключён")
             return True
         except Exception as exc:
-            print(f"NextCloud: ошибка - {exc}")
+            print(f"NextCloud: ошибка подключения — {exc}")
         self.nextcloud = None
         return False
+
+    def disconnect(self, disk_id: str):
+        if disk_id == "yandex":
+            self.yandex = None
+        elif disk_id == "nextcloud":
+            self.nextcloud = None
 
     def is_connected(self, disk_id: str) -> bool:
         if disk_id == "yandex":
@@ -89,64 +91,58 @@ class CloudAPI:
 
         if disk_id == "yandex" and self.yandex:
             result = []
-            for item in self.yandex.listdir(remote):
-                result.append(
-                    {
-                        "name": item.name,
-                        "path": item.path.replace("disk:", "", 1),
-                        "is_dir": bool(item.is_dir),
-                    }
-                )
+            try:
+                for item in self.yandex.listdir(remote):
+                    item_type = getattr(item, "type", None) or ""
+                    is_dir = str(item_type).lower() == "dir"
+                    raw_path = getattr(item, "path", "") or ""
+                    clean_path = raw_path.replace("disk:", "", 1) if raw_path.startswith("disk:") else raw_path
+                    name = getattr(item, "name", None) or clean_path.rstrip("/").split("/")[-1]
+                    if not name:
+                        continue
+                    result.append({"name": name, "path": clean_path, "is_dir": is_dir})
+            except Exception as exc:
+                print(f"Яндекс.Диск: ошибка листинга {remote} — {exc}")
             return result
 
         if disk_id == "nextcloud" and self.nextcloud:
-            try:
-                items = self.nextcloud.list(remote, get_info=True)
-            except TypeError:
-                items = self.nextcloud.list(remote)
-
             result = []
-            for item in items:
-                if isinstance(item, dict):
-                    name = item.get("name", "").rstrip("/")
-                    if not name or name in (".", ".."):
-                        continue
-                    item_path = f"{remote.rstrip('/')}/{name}".replace(
-                        "//",
-                        "/",
-                    )
-                    result.append(
-                        {
-                            "name": name,
-                            "path": item_path,
-                            "is_dir": bool(item.get("isdir", False)),
-                        }
-                    )
-                elif isinstance(item, str):
-                    name = item.strip("/").split("/")[-1]
-                    if not name or name in (".", ".."):
-                        continue
-                    is_dir = item.endswith("/")
-                    item_path = f"{remote.rstrip('/')}/{name}".replace(
-                        "//",
-                        "/",
-                    )
-                    result.append(
-                        {"name": name, "path": item_path, "is_dir": is_dir}
-                    )
+            try:
+                try:
+                    items = self.nextcloud.list(remote, get_info=True)
+                except TypeError:
+                    items = self.nextcloud.list(remote)
+
+                for item in items:
+                    if isinstance(item, dict):
+                        name = item.get("name", "").rstrip("/")
+                        if not name or name in (".", ".."):
+                            continue
+                        item_path = f"{remote.rstrip('/')}/{name}".replace("//", "/")
+                        result.append(
+                            {
+                                "name": name,
+                                "path": item_path,
+                                "is_dir": bool(item.get("isdir", False)),
+                            }
+                        )
+                    elif isinstance(item, str):
+                        name = item.strip("/").split("/")[-1]
+                        if not name or name in (".", ".."):
+                            continue
+                        is_dir = item.endswith("/")
+                        item_path = f"{remote.rstrip('/')}/{name}".replace("//", "/")
+                        result.append({"name": name, "path": item_path, "is_dir": is_dir})
+            except Exception as exc:
+                print(f"NextCloud: ошибка листинга {remote} — {exc}")
             return result
 
         return []
 
-    def download_file(
-        self,
-        disk_id: str,
-        remote_path: str,
-        local_path: str,
-    ) -> bool:
+    def download_file(self, disk_id: str, remote_path: str, local_path: str) -> bool:
         remote = self._normalize_remote_path(remote_path)
         try:
-            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            os.makedirs(os.path.dirname(local_path) or ".", exist_ok=True)
             if disk_id == "yandex" and self.yandex:
                 self.yandex.download(remote, local_path)
                 return True
@@ -154,18 +150,15 @@ class CloudAPI:
                 self.nextcloud.download_file(remote, local_path)
                 return True
         except Exception as exc:
-            print(f"Ошибка скачивания {disk_id} {remote}: {exc}")
+            print(f"Ошибка скачивания [{disk_id}] {remote}: {exc}")
         return False
 
-    def upload_file(
-        self,
-        disk_id: str,
-        local_path: str,
-        remote_path: str,
-    ) -> bool:
+    def upload_file(self, disk_id: str, local_path: str, remote_path: str) -> bool:
         remote = self._normalize_remote_path(remote_path)
         try:
-            self.create_folder(disk_id, self._ensure_parent(remote))
+            parent = self._ensure_parent(remote)
+            if parent != "/":
+                self.create_folder(disk_id, parent)
             if disk_id == "yandex" and self.yandex:
                 self.yandex.upload(local_path, remote, overwrite=True)
                 return True
@@ -173,7 +166,7 @@ class CloudAPI:
                 self.nextcloud.upload_file(local_path, remote)
                 return True
         except Exception as exc:
-            print(f"Ошибка загрузки {disk_id} {remote}: {exc}")
+            print(f"Ошибка загрузки [{disk_id}] {remote}: {exc}")
         return False
 
     def create_folder(self, disk_id: str, remote_path: str) -> bool:
@@ -190,7 +183,7 @@ class CloudAPI:
                     self.nextcloud.mkdir(remote)
                 return True
         except Exception as exc:
-            print(f"Ошибка создания папки {disk_id} {remote}: {exc}")
+            print(f"Ошибка создания папки [{disk_id}] {remote}: {exc}")
         return False
 
     def delete_path(self, disk_id: str, remote_path: str) -> bool:
@@ -205,5 +198,19 @@ class CloudAPI:
                     self.nextcloud.clean(remote)
                 return True
         except Exception as exc:
-            print(f"Ошибка удаления {disk_id} {remote}: {exc}")
+            print(f"Ошибка удаления [{disk_id}] {remote}: {exc}")
+        return False
+
+    def move_path(self, disk_id: str, src_path: str, dst_path: str) -> bool:
+        src = self._normalize_remote_path(src_path)
+        dst = self._normalize_remote_path(dst_path)
+        try:
+            if disk_id == "yandex" and self.yandex:
+                self.yandex.move(src, dst, overwrite=True)
+                return True
+            if disk_id == "nextcloud" and self.nextcloud:
+                self.nextcloud.move(src, dst)
+                return True
+        except Exception as exc:
+            print(f"Ошибка перемещения [{disk_id}] {src} → {dst}: {exc}")
         return False
