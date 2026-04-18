@@ -16,7 +16,6 @@ from PyQt6.QtWidgets import (  # type: ignore[import-not-found]
 
 from core.redisk_service import DISK_TITLES, RediskService
 from core.yandex_oauth import (
-    OAuthResult,
     yandex_exchange_code_for_token,
     yandex_start_oauth,
 )
@@ -111,19 +110,23 @@ class TrayController:
             or os.environ.get("DISCOHACK_YANDEX_CLIENT_ID")
             or os.environ.get("YANDEX_CLIENT_ID")
         )
-        redirect_uri = oauth_cfg.get("redirect_uri") or "http://127.0.0.1:8085/callback"
+        redirect_uri = oauth_cfg.get("redirect_uri") or (
+            "http://127.0.0.1:8085/callback"
+        )
         oauth_cfg["redirect_uri"] = redirect_uri
         save_config(cfg)
         if not client_id:
-            QMessageBox.critical(
-                None,
+            self._log("Yandex OAuth client_id missing.")
+            self._log(
+                "Set oauth.yandex.client_id in ~/.config/discohack/config.json "
+                "or env DISCOHACK_YANDEX_CLIENT_ID.",
+            )
+            self.show_notification(
                 "DiscoHack",
                 (
-                    "Не настроен Yandex OAuth client_id.\n\n"
-                    "Для сборки хакатона задайте его один раз:\n"
-                    "- в ~/.config/discohack/config.json (oauth.yandex.client_id)\n"
-                    "- или переменной окружения DISCOHACK_YANDEX_CLIENT_ID\n\n"
-                    "После этого кнопка откроет окно входа Яндекса."
+                    "Не настроен Yandex client_id. "
+                    "Заполни oauth.yandex.client_id в config.json "
+                    "или DISCOHACK_YANDEX_CLIENT_ID."
                 ),
             )
             return
@@ -138,14 +141,13 @@ class TrayController:
                 redirect_uri=redirect_uri,
             )
         except OSError as exc:
-            QMessageBox.critical(
-                None,
+            self._log(
+                f"OAuth callback server error: {exc!r} "
+                f"redirect_uri={redirect_uri}",
+            )
+            self.show_notification(
                 "DiscoHack",
-                (
-                    "Не удалось запустить локальный callback-сервер для OAuth.\n\n"
-                    f"Проверьте, что порт из redirect_uri свободен ({redirect_uri}).\n"
-                    f"Ошибка: {exc}"
-                ),
+                f"OAuth callback не запустился (порт занят?): {redirect_uri}",
             )
             return
         webbrowser.open(auth_url, new=2)
