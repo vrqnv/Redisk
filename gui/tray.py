@@ -6,6 +6,7 @@ import webbrowser
 
 from PIL import Image, ImageDraw  # type: ignore[import-not-found]
 from PyQt6.QtGui import QAction, QIcon  # type: ignore[import-not-found]
+from PyQt6.QtCore import QPoint  # type: ignore[import-not-found]
 from PyQt6.QtWidgets import (  # type: ignore[import-not-found]
     QApplication,
     QInputDialog,
@@ -35,12 +36,28 @@ class TrayController:
         self.service = service
         self.notifications_enabled = True
         self.menu = QMenu()
+        self.add_disk_action = QAction("Добавить диск")
+        self.disconnect_action = QAction("Отключить диск")
+        self.open_action = QAction("Открыть Redisk")
         self.notifications_action = QAction("Отключить уведомления")
+        self.add_disk_action.triggered.connect(self.show_add_disk_menu)
+        self.disconnect_action.triggered.connect(self.show_disconnect_menu)
+        self.open_action.triggered.connect(self.open_redisk)
         self.notifications_action.triggered.connect(self.toggle_notifications)
+
+        self._log_path = os.path.expanduser("~/.cache/discohack/tray.log")
+        os.makedirs(os.path.dirname(self._log_path), exist_ok=True)
 
     def show_notification(self, title: str, message: str):
         if self.notifications_enabled:
             self.tray_icon.showMessage(title, message)
+
+    def _log(self, message: str):
+        try:
+            with open(self._log_path, "a", encoding="utf-8") as f:
+                f.write(message.rstrip() + "\n")
+        except Exception:
+            pass
 
     def open_redisk(self):
         mount_dir = str(self.service.root_dir)
@@ -57,6 +74,13 @@ class TrayController:
             return
 
         print(f"Открыт Redisk: {mount_dir}")
+
+    def _popup_menu_near_cursor(self, menu: QMenu):
+        try:
+            pos = QPoint(QCursor.pos())  # type: ignore[name-defined]
+        except Exception:
+            pos = QPoint(0, 0)
+        menu.popup(pos)
 
     def connect_disk(self, disk_id: str):
         disk_title = DISK_TITLES[disk_id]
@@ -134,64 +158,69 @@ class TrayController:
             print("Уведомления отключены")
             self.notifications_action.setText("Включить уведомления")
 
-    def add_disconnect_menu(self):
+    def show_disconnect_menu(self):
         connected_disks = self.service.get_connected_disks()
+        menu = QMenu()
         if not connected_disks:
-            return
+            disabled_action = QAction("Нет подключенных дисков")
+            disabled_action.setEnabled(False)
+            menu.addAction(disabled_action)
+        else:
+            for disk_id in connected_disks:
+                action = QAction(f"Отключить {DISK_TITLES[disk_id]}")
+                action.triggered.connect(
+                    lambda _, d=disk_id: self.disconnect_disk(d),
+                )
+                menu.addAction(action)
+        menu.popup(QCursor.pos())  # type: ignore[name-defined]
 
-        if len(connected_disks) == 1:
-            disk_id = connected_disks[0]
-            action = QAction(f"Отключить {DISK_TITLES[disk_id]}")
-            action.triggered.connect(lambda: self.disconnect_disk(disk_id))
-            self.menu.addAction(action)
-            return
-
-        disconnect_menu = QMenu("Отключить диск")
-        for disk_id in connected_disks:
-            action = QAction(f"Отключить {DISK_TITLES[disk_id]}")
-            action.triggered.connect(
-                lambda _, d=disk_id: self.disconnect_disk(d),
-            )
-            disconnect_menu.addAction(action)
-        self.menu.addMenu(disconnect_menu)
-
-    def add_add_disk_menu(self):
-        add_menu = QMenu("Добавить диск")
+    def show_add_disk_menu(self):
         connected_disks = set(self.service.get_connected_disks())
-        available = [
-            disk_id
-            for disk_id in ("yandex", "nextcloud")
-            if disk_id not in connected_disks
-        ]
-
+        available = [d for d in ("yandex", "nextcloud") if d not in connected_disks]
+        menu = QMenu()
         if not available:
             disabled_action = QAction("Все диски уже подключены")
             disabled_action.setEnabled(False)
-            add_menu.addAction(disabled_action)
+            menu.addAction(disabled_action)
         else:
             for disk_id in available:
                 action = QAction(DISK_TITLES[disk_id])
                 action.triggered.connect(
                     lambda _, d=disk_id: self.connect_disk(d),
                 )
-                add_menu.addAction(action)
-
-        self.menu.addMenu(add_menu)
+                menu.addAction(action)
+        menu.popup(QCursor.pos())  # type: ignore[name-defined]
 
     def rebuild_menu(self):
         self.menu.clear()
-        self.add_disconnect_menu()
-        self.add_add_disk_menu()
+        try:
+            connected_disks = self.service.get_connected_disks()
+            if connected_disks:
+                if len(connected_disks) == 1:
+                    disk_id = connected_disks[0]
+                    self.disconnect_action.setText(
+                        f"Отключить {DISK_TITLES[disk_id]}",
+                    )
+                else:
+                    self.disconnect_action.setText("Отключить диск")
+                self.menu.addAction(self.disconnect_action)
 
-        open_action = QAction("Открыть Redisk")
-        open_action.triggered.connect(self.open_redisk)
-        self.menu.addAction(open_action)
-        self.menu.addAction(self.notifications_action)
-
-        self.menu.addSeparator()
-        quit_action = QAction("Закрыть")
-        quit_action.triggered.connect(self.quit_app)
-        self.menu.addAction(quit_action)
+            self.menu.addAction(self.add_disk_action)
+            self.menu.addAction(self.open_action)
+            self.menu.addAction(self.notifications_action)
+            self.menu.addSeparator()
+            quit_action = QAction("Закрыть")
+            quit_action.triggered.connect(self.quit_app)
+            self.menu.addAction(quit_action)
+            self.tray_icon.setContextMenu(self.menu)
+        except Exception as exc:
+            self._log(f"rebuild_menu error: {exc!r}")
+            self.menu.clear()
+            self.menu.addAction(self.notifications_action)
+            quit_action = QAction("Закрыть")
+            quit_action.triggered.connect(self.quit_app)
+            self.menu.addAction(quit_action)
+            self.tray_icon.setContextMenu(self.menu)
 
     def quit_app(self):
         print("Программа закрыта")
@@ -214,6 +243,7 @@ def create_icon_path():
 
 def run_tray(service: RediskService):
     app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
     icon_path = create_icon_path()
     tray_icon = QSystemTrayIcon(QIcon(icon_path), parent=app)
 
