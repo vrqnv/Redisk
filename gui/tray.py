@@ -15,9 +15,17 @@ from PyQt6.QtWidgets import (  # type: ignore[import-not-found]
 )
 
 from core.redisk_service import DISK_TITLES, RediskService
+from core.yandex_oauth import (
+    OAuthResult,
+    yandex_exchange_code_for_token,
+    yandex_start_oauth,
+)
+from utils.config import load_config, save_config
 
 DISK_AUTH_URLS = {
-    "yandex": "https://oauth.yandex.ru/authorize",
+    # ВАЖНО: oauth.yandex.ru/authorize требует client_id, иначе будет 400.
+    # Поэтому для "просто перейти" открываем страницу Диска/логина.
+    "yandex": "https://disk.yandex.ru/",
     "nextcloud": "https://nextcloud.com/sign-up/",
 }
 
@@ -40,7 +48,7 @@ class TrayController:
         self.disconnect_nextcloud_action = QAction("Отключить NextCloud")
         self.open_action = QAction("Открыть Redisk")
         self.notifications_action = QAction("Отключить уведомления")
-        self.add_yandex_action.triggered.connect(lambda: self.connect_disk("yandex"))
+        self.add_yandex_action.triggered.connect(self.add_yandex_flow)
         self.add_nextcloud_action.triggered.connect(
             lambda: self.connect_disk("nextcloud"),
         )
@@ -90,21 +98,91 @@ class TrayController:
 
         print(f"Открыт Redisk: {mount_dir}")
 
+    def open_disk_site(self, disk_id: str):
+        url = DISK_AUTH_URLS[disk_id]
+        webbrowser.open(url, new=2)
+        print(f"Открыт сайт: {DISK_TITLES[disk_id]} -> {url}")
+
+    def add_yandex_flow(self):
+        cfg = load_config()
+        oauth_cfg = cfg.setdefault("oauth", {}).setdefault("yandex", {})
+        client_id = oauth_cfg.get("client_id")
+        redirect_uri = oauth_cfg.get("redirect_uri") or "http://127.0.0.1:8085/callback"
+        oauth_cfg["redirect_uri"] = redirect_uri
+        save_config(cfg)
+        if not client_id:
+            client_id, ok = QInputDialog.getText(
+                None,
+                "Yandex OAuth",
+                "Введите client_id вашего приложения (oauth.yandex.com):",
+            )
+            if not ok or not client_id.strip():
+                return
+            oauth_cfg["client_id"] = client_id.strip()
+            save_config(cfg)
+            client_id = oauth_cfg["client_id"]
+
+        # Запускаем OAuth (PKCE) с локальным callback.
+        auth_url, _redirect_uri, verifier, result = yandex_start_oauth(
+            client_id=client_id,
+            scope=None,
+            redirect_uri=redirect_uri,
+        )
+        webbrowser.open(auth_url, new=2)
+
+        # Ждём callback (до 3 минут). В идеале это вынести в thread,
+        # но для прототипа оставляем простое ожидание.
+        ok = result.wait(timeout_s=180.0)
+        if not ok or result.error or not result.code:
+            QMessageBox.critical(
+                None,
+                "DiscoHack",
+                f"Ошибка авторизации Яндекс: {result.error or 'timeout'}",
+            )
+            return
+
+        try:
+            token_data = yandex_exchange_code_for_token(
+                client_id=client_id,
+                code=result.code,
+                code_verifier=verifier,
+            )
+        except Exception as exc:
+            QMessageBox.critical(
+                None,
+                "DiscoHack",
+                f"Не удалось получить токен: {exc}",
+            )
+            return
+
+        access_token = token_data.get("access_token")
+        if not access_token:
+            QMessageBox.critical(
+                None,
+                "DiscoHack",
+                "Не получен access_token от Яндекс OAuth",
+            )
+            return
+
+        is_connected = self.service.connect_yandex(access_token)
+        if not is_connected:
+            QMessageBox.critical(
+                None,
+                "DiscoHack",
+                "Не удалось подключить Яндекс.Диск через полученный токен",
+            )
+            return
+
+        self.show_notification("DiscoHack", "Яндекс.Диск подключен")
+        self.open_redisk()
+        self.rebuild_menu()
+
     def connect_disk(self, disk_id: str):
         disk_title = DISK_TITLES[disk_id]
-        auth_url = DISK_AUTH_URLS[disk_id]
-
-        webbrowser.open(auth_url, new=2)
-        print(f"Открыта авторизация: {disk_title}")
         if disk_id == "yandex":
-            token, ok = QInputDialog.getText(
-                None,
-                "Подключение Яндекс.Диск",
-                "Вставьте OAuth токен:",
-            )
-            if not ok or not token.strip():
-                return
-            is_connected = self.service.connect_yandex(token.strip())
+            # Яндекс подключаем через add_yandex_flow (OAuth code flow).
+            self.add_yandex_flow()
+            return
         else:
             url, ok = QInputDialog.getText(
                 None,
@@ -116,6 +194,10 @@ class TrayController:
             )
             if not ok or not url.strip():
                 return
+            # Для удобства откроем страницу логина указанного сервера.
+            base = url.strip().split("/remote.php", 1)[0].rstrip("/")
+            if base.startswith("http"):
+                webbrowser.open(f"{base}/login", new=2)
             login, ok = QInputDialog.getText(
                 None,
                 "Подключение NextCloud",
