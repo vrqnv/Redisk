@@ -5,6 +5,10 @@ from PyQt6.QtGui import QIcon, QAction
 from PIL import Image, ImageDraw
 
 
+# Глобальная переменная для состояния уведомлений
+notifications_enabled = True
+
+
 def create_icon_path():
     width = 64
     height = 64
@@ -21,8 +25,16 @@ def on_open():
     print("Открыт Redisk")
 
 
-def on_notifications():
-    print("Уведомления отключены")
+def on_toggle_notifications(action):
+    global notifications_enabled
+    notifications_enabled = not notifications_enabled
+    
+    if notifications_enabled:
+        print("Уведомления включены")
+        action.setText("Отключить уведомления")
+    else:
+        print("Уведомления отключены")
+        action.setText("Включить уведомления")
 
 
 def on_quit(tray_icon, app):
@@ -32,6 +44,7 @@ def on_quit(tray_icon, app):
 
 
 def run_tray():
+    global notifications_enabled
     app = QApplication(sys.argv)
     icon_path = create_icon_path()
     tray_icon = QSystemTrayIcon(QIcon(icon_path), parent=app)
@@ -43,7 +56,7 @@ def run_tray():
     menu.addAction(open_action)
     
     notifications_action = QAction("Отключить уведомления")
-    notifications_action.triggered.connect(on_notifications)
+    notifications_action.triggered.connect(lambda: on_toggle_notifications(notifications_action))
     menu.addAction(notifications_action)
     
     menu.addSeparator()
