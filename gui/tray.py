@@ -19,6 +19,7 @@ from core.yandex_oauth import (
     yandex_exchange_code_for_token,
     yandex_start_oauth,
 )
+from cloud.config import YANDEX_TOKEN
 from utils.config import load_config, save_config
 
 DISK_AUTH_URLS = {
@@ -110,6 +111,11 @@ class TrayController:
             or os.environ.get("DISCOHACK_YANDEX_CLIENT_ID")
             or os.environ.get("YANDEX_CLIENT_ID")
         )
+        fallback_token = (
+            os.environ.get("DISCOHACK_YANDEX_TOKEN")
+            or os.environ.get("YANDEX_TOKEN")
+            or YANDEX_TOKEN
+        )
         redirect_uri = oauth_cfg.get("redirect_uri") or (
             "http://127.0.0.1:8085/callback"
         )
@@ -156,6 +162,18 @@ class TrayController:
         # но для прототипа оставляем простое ожидание.
         ok = result.wait(timeout_s=180.0)
         if not ok or result.error or not result.code:
+            self._log(
+                "Yandex OAuth code flow failed, trying fallback token. "
+                f"error={result.error or 'timeout'}",
+            )
+            if fallback_token and self.service.connect_yandex(fallback_token):
+                self.show_notification(
+                    "DiscoHack",
+                    "Яндекс.Диск подключен по fallback токену",
+                )
+                self.open_redisk()
+                self.rebuild_menu()
+                return
             QMessageBox.critical(
                 None,
                 "DiscoHack",
