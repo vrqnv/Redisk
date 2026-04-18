@@ -8,15 +8,14 @@ from PIL import Image, ImageDraw  # type: ignore[import-not-found]
 from PyQt6.QtGui import QAction, QIcon  # type: ignore[import-not-found]
 from PyQt6.QtWidgets import (  # type: ignore[import-not-found]
     QApplication,
+    QInputDialog,
+    QLineEdit,
     QMenu,
+    QMessageBox,
     QSystemTrayIcon,
 )
 
-
-DISK_TITLES = {
-    "yandex": "Яндекс.Диск",
-    "nextcloud": "NextCloud",
-}
+from core.redisk_service import DISK_TITLES, RediskService
 
 DISK_AUTH_URLS = {
     "yandex": "https://oauth.yandex.ru/authorize",
@@ -25,11 +24,16 @@ DISK_AUTH_URLS = {
 
 
 class TrayController:
-    def __init__(self, app: QApplication, tray_icon: QSystemTrayIcon):
+    def __init__(
+        self,
+        app: QApplication,
+        tray_icon: QSystemTrayIcon,
+        service: RediskService,
+    ):
         self.app = app
         self.tray_icon = tray_icon
+        self.service = service
         self.notifications_enabled = True
-        self.connected_disks: set[str] = set()
         self.menu = QMenu()
         self.notifications_action = QAction("Отключить уведомления")
         self.notifications_action.triggered.connect(self.toggle_notifications)
@@ -39,7 +43,7 @@ class TrayController:
             self.tray_icon.showMessage(title, message)
 
     def open_redisk(self):
-        mount_dir = os.path.expanduser("~/Redisk")
+        mount_dir = str(self.service.root_dir)
         os.makedirs(mount_dir, exist_ok=True)
 
         try:
@@ -60,20 +64,65 @@ class TrayController:
 
         webbrowser.open(auth_url, new=2)
         print(f"Открыта авторизация: {disk_title}")
+        if disk_id == "yandex":
+            token, ok = QInputDialog.getText(
+                None,
+                "Подключение Яндекс.Диск",
+                "Вставьте OAuth токен:",
+            )
+            if not ok or not token.strip():
+                return
+            is_connected = self.service.connect_yandex(token.strip())
+        else:
+            url, ok = QInputDialog.getText(
+                None,
+                "Подключение NextCloud",
+                (
+                    "URL WebDAV (например "
+                    "https://.../remote.php/dav/files/<user>/):"
+                ),
+            )
+            if not ok or not url.strip():
+                return
+            login, ok = QInputDialog.getText(
+                None,
+                "Подключение NextCloud",
+                "Логин:",
+            )
+            if not ok or not login.strip():
+                return
+            password, ok = QInputDialog.getText(
+                None,
+                "Подключение NextCloud",
+                "Пароль / App Password:",
+                QLineEdit.EchoMode.Password,
+            )
+            if not ok or not password:
+                return
+            is_connected = self.service.connect_nextcloud(
+                url=url.strip(),
+                login=login.strip(),
+                password=password,
+            )
 
-        # Для прототипа считаем, что авторизация успешна после перехода.
-        self.connected_disks.add(disk_id)
+        if not is_connected:
+            QMessageBox.critical(
+                None,
+                "DiscoHack",
+                f"Не удалось подключить {disk_title}. Проверьте данные.",
+            )
+            return
+
         self.show_notification("DiscoHack", f"{disk_title} подключен")
         self.open_redisk()
         self.rebuild_menu()
 
     def disconnect_disk(self, disk_id: str):
         disk_title = DISK_TITLES[disk_id]
-        if disk_id in self.connected_disks:
-            self.connected_disks.remove(disk_id)
-            self.show_notification("DiscoHack", f"{disk_title} отключен")
-            print(f"Отключен диск: {disk_title}")
-            self.rebuild_menu()
+        self.service.disconnect_disk(disk_id)
+        self.show_notification("DiscoHack", f"{disk_title} отключен")
+        print(f"Отключен диск: {disk_title}")
+        self.rebuild_menu()
 
     def toggle_notifications(self):
         self.notifications_enabled = not self.notifications_enabled
@@ -86,29 +135,33 @@ class TrayController:
             self.notifications_action.setText("Включить уведомления")
 
     def add_disconnect_menu(self):
-        if not self.connected_disks:
+        connected_disks = self.service.get_connected_disks()
+        if not connected_disks:
             return
 
-        if len(self.connected_disks) == 1:
-            disk_id = next(iter(self.connected_disks))
+        if len(connected_disks) == 1:
+            disk_id = connected_disks[0]
             action = QAction(f"Отключить {DISK_TITLES[disk_id]}")
             action.triggered.connect(lambda: self.disconnect_disk(disk_id))
             self.menu.addAction(action)
             return
 
         disconnect_menu = QMenu("Отключить диск")
-        for disk_id in sorted(self.connected_disks):
+        for disk_id in connected_disks:
             action = QAction(f"Отключить {DISK_TITLES[disk_id]}")
-            action.triggered.connect(lambda _, d=disk_id: self.disconnect_disk(d))
+            action.triggered.connect(
+                lambda _, d=disk_id: self.disconnect_disk(d),
+            )
             disconnect_menu.addAction(action)
         self.menu.addMenu(disconnect_menu)
 
     def add_add_disk_menu(self):
         add_menu = QMenu("Добавить диск")
+        connected_disks = set(self.service.get_connected_disks())
         available = [
             disk_id
             for disk_id in ("yandex", "nextcloud")
-            if disk_id not in self.connected_disks
+            if disk_id not in connected_disks
         ]
 
         if not available:
@@ -118,7 +171,9 @@ class TrayController:
         else:
             for disk_id in available:
                 action = QAction(DISK_TITLES[disk_id])
-                action.triggered.connect(lambda _, d=disk_id: self.connect_disk(d))
+                action.triggered.connect(
+                    lambda _, d=disk_id: self.connect_disk(d),
+                )
                 add_menu.addAction(action)
 
         self.menu.addMenu(add_menu)
@@ -140,6 +195,7 @@ class TrayController:
 
     def quit_app(self):
         print("Программа закрыта")
+        self.service.shutdown()
         self.tray_icon.hide()
         self.app.quit()
 
@@ -156,12 +212,12 @@ def create_icon_path():
     return temp_file.name
 
 
-def run_tray():
+def run_tray(service: RediskService):
     app = QApplication(sys.argv)
     icon_path = create_icon_path()
     tray_icon = QSystemTrayIcon(QIcon(icon_path), parent=app)
 
-    controller = TrayController(app=app, tray_icon=tray_icon)
+    controller = TrayController(app=app, tray_icon=tray_icon, service=service)
     controller.rebuild_menu()
 
     tray_icon.setContextMenu(controller.menu)
@@ -172,4 +228,4 @@ def run_tray():
 
 
 if __name__ == "__main__":
-    run_tray()
+    run_tray(RediskService())
