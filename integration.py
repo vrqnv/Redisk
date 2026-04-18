@@ -6,7 +6,6 @@ YANDEX_WEBDAV_URL = "davs://webdav.yandex.ru"
 
 
 def _run_command(command):
-    """Run a command and return (success, output)."""
     try:
         result = subprocess.run(
             command,
@@ -21,7 +20,6 @@ def _run_command(command):
 
 
 def mount_cloud(service_name):
-    """Mount cloud storage via gio/gvfs."""
     if service_name != "yandex":
         return False, f"Неподдерживаемый сервис: {service_name}"
 
@@ -29,7 +27,6 @@ def mount_cloud(service_name):
         ok, output = _run_command(["gio", "mount", YANDEX_WEBDAV_URL])
         if ok:
             return True, "Монтирование выполнено через gio"
-        # If already mounted, gio usually returns non-zero with this phrase.
         if "already mounted" in output.lower():
             return True, "Ресурс уже смонтирован"
 
@@ -43,7 +40,6 @@ def mount_cloud(service_name):
 
 
 def unmount_cloud(service_name):
-    """Unmount cloud storage via gio/gvfs."""
     if service_name != "yandex":
         return False, f"Неподдерживаемый сервис: {service_name}"
 
@@ -64,7 +60,6 @@ def unmount_cloud(service_name):
 
 
 def is_cloud_mounted(service_name):
-    """Check whether cloud storage is currently mounted."""
     if service_name != "yandex":
         return False
 
@@ -79,3 +74,4 @@ def is_cloud_mounted(service_name):
             return True
 
     return False
+    

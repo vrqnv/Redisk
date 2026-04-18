@@ -10,7 +10,7 @@ class SyncHandler(FileSystemEventHandler):
         self.cloud = cloud
         self.local_dir = os.path.abspath(local_dir)
         self.remote_dir = remote_dir.rstrip("/") or "/"
-        self.pending = {}  # для дедупликации событий
+        self.pending = {} 
         self.suppress_upload = suppress_upload
 
     def _to_remote_path(self, local_path):
@@ -21,7 +21,7 @@ class SyncHandler(FileSystemEventHandler):
         if not event.is_directory:
             if self.suppress_upload(event.src_path):
                 return
-            time.sleep(0.1)  # ждём завершения записи
+            time.sleep(0.1) 
             rel_path = os.path.relpath(event.src_path, self.local_dir)
             remote_path = self._to_remote_path(event.src_path)
             try:
@@ -46,7 +46,7 @@ class SyncHandler(FileSystemEventHandler):
         if not event.is_directory:
             if self.suppress_upload(event.src_path):
                 return
-            # Избегаем двойной синхронизации
+
             if event.src_path in self.pending:
                 return
             self.pending[event.src_path] = time.time()
@@ -99,7 +99,6 @@ class BidirectionalSync:
     def _parse_remote_modified(self, modified_str):
         if not modified_str:
             return 0
-        # Yandex usually returns RFC3339 datetime.
         try:
             return datetime.fromisoformat(modified_str.replace("Z", "+00:00")).timestamp()
         except ValueError:
@@ -188,7 +187,6 @@ class BidirectionalSync:
         for remote_path in sorted(both):
             remote_meta = remote_files[remote_path]
             local_meta = local_files[remote_path]
-            # Simple conflict policy: newer side wins.
             if remote_meta["modified"] > local_meta["modified"] + 2:
                 try:
                     self._download_remote_file(remote_path)
@@ -276,6 +274,6 @@ class BidirectionalSync:
 
 
 def start_sync(cloud, local_dir, remote_dir, poll_interval=20):
-    """Запустить двустороннюю синхронизацию."""
     sync_worker = BidirectionalSync(cloud, local_dir, remote_dir, poll_interval=poll_interval)
     return sync_worker.start()
+    
