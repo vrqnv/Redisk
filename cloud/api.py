@@ -56,6 +56,8 @@ class CloudAPI:
             parsed = urlsplit(cfg["url"])
             hostname = f"{parsed.scheme}://{parsed.netloc}"
             root = parsed.path if parsed.path else "/"
+            if not root.endswith("/"):
+                root += "/"
             client = WebDAVClient(
                 {
                     "webdav_hostname": hostname,
@@ -64,7 +66,18 @@ class CloudAPI:
                     "webdav_password": cfg["password"],
                 }
             )
-            client.list("/")
+            # Some WebDAV setups restrict LIST but allow lightweight checks.
+            # Try multiple probes to avoid false-negative "cannot connect".
+            ok = False
+            for probe in (lambda: client.check("/"), lambda: client.list("/")):
+                try:
+                    probe()
+                    ok = True
+                    break
+                except Exception:
+                    continue
+            if not ok:
+                raise RuntimeError("WebDAV endpoint is not reachable with provided credentials")
             self.nextcloud = client
             print("NextCloud: подключён")
             return True
@@ -163,7 +176,8 @@ class CloudAPI:
                 self.yandex.upload(local_path, remote, overwrite=True)
                 return True
             if disk_id == "nextcloud" and self.nextcloud:
-                self.nextcloud.upload_file(local_path, remote)
+                # webdavclient3 expects (remote_path, local_path)
+                self.nextcloud.upload_file(remote, local_path)
                 return True
         except Exception as exc:
             print(f"Ошибка загрузки [{disk_id}] {remote}: {exc}")

@@ -110,14 +110,59 @@ class CacheManager:
             if self.metadata.get_pinned_status(path):
                 continue
 
+            meta = self.metadata.get(path)
+            file_size = int(meta.get('size', 0)) if meta else 0
             self.evict(path)
-            freed += self.metadata.get(path)['size']
+            freed += file_size
             self.stats['evictions'] += 1  
             if freed >= needed_bytes:
                 break
 
         if freed < needed_bytes:
             raise DiskFullError(f"Need {needed_bytes} bytes, only {freed} freed")
+
+    def cache_local_file(self, path: str, local_path: str, file_id: str | None = None):
+        """Поместить существующий локальный файл в кэш и обновить метаданные."""
+        with self._lock:
+            src = Path(local_path)
+            if not src.exists() or src.is_dir():
+                raise FileNotFoundError(local_path)
+
+            fid = file_id or path
+            size = src.stat().st_size
+            modified = int(src.stat().st_mtime)
+
+            if size > self.get_free_space():
+                self._free_space(size)
+
+            cache_path = self.content.put(fid, src)
+            self.metadata.set(path, fid, size, modified, etag="", is_dir=False)
+            self.metadata.mark_cached(path, str(cache_path))
+
+    def restore_to_local(self, path: str, local_path: str) -> bool:
+        """Восстановить файл из кэша в целевой путь."""
+        with self._lock:
+            meta = self.metadata.get(path)
+            if not meta or not meta.get("cached"):
+                return False
+            file_id = meta.get("file_id")
+            if not file_id or not self.content.exists(file_id):
+                self.metadata.mark_uncached(path)
+                return False
+
+            src = self.content.get(file_id)
+            if src is None:
+                self.metadata.mark_uncached(path)
+                return False
+
+            dst = Path(local_path)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            with open(src, "rb") as in_f, open(dst, "wb") as out_f:
+                out_f.write(in_f.read())
+
+            self.metadata.update_access_time(path)
+            self.stats['cache_hits'] += 1
+            return True
 
     def evict(self, path: str):
         """Принудительно удалить файл из кэша"""
@@ -173,3 +218,16 @@ class CacheManager:
         """Закрыть все соединения"""
         with self._lock:
             self.metadata.close()
+
+    def clear_all(self) -> int:
+        """Удалить все незакреплённые файлы из кэша. Возвращает число очищенных файлов."""
+        with self._lock:
+            paths = list(self.metadata.get_all_cached_paths())
+            removed = 0
+            for path in paths:
+                try:
+                    self.evict(path)
+                    removed += 1
+                except PinnedFileError:
+                    continue
+            return removed

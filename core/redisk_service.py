@@ -6,6 +6,7 @@ from pathlib import Path
 from watchdog.events import FileSystemEventHandler  # type: ignore[import-not-found]
 from watchdog.observers import Observer  # type: ignore[import-not-found]
 
+from cache import CacheManager
 from cloud.api import CloudAPI
 from utils.config import load_config, save_config
 
@@ -26,8 +27,11 @@ class RediskService:
 
         self.config = load_config()
         self.config.setdefault("disks", {})
+        self.config.setdefault("cache", {})
 
         self.api = CloudAPI(config=self.config)
+        cache_size_mb = int(self.config["cache"].get("max_size_mb", 5120))
+        self.cache = CacheManager(max_size_mb=cache_size_mb)
         self._pause_depth = 0
 
         self.observer = Observer()
@@ -127,6 +131,13 @@ class RediskService:
     def shutdown(self):
         self.observer.stop()
         self.observer.join(timeout=2)
+        self.cache.close()
+
+    def get_cache_stats(self) -> dict:
+        return self.cache.get_stats()
+
+    def clear_cache(self) -> int:
+        return self.cache.clear_all()
 
     # ------------------------------------------------------------------ #
     # Sync                                                                 #
@@ -170,7 +181,23 @@ class RediskService:
                 self._sync_dir_from_cloud(disk_id, item["path"], child_local)
             else:
                 target_file = local_dir / name
-                self.api.download_file(disk_id, item["path"], str(target_file))
+                cache_key = self._cache_key(disk_id, item["path"])
+                if target_file.exists():
+                    # Локальный файл уже есть: используем его как источник кэша.
+                    try:
+                        self.cache.cache_local_file(cache_key, str(target_file), file_id=cache_key)
+                    except Exception as exc:
+                        print(f"Cache update skipped for {target_file}: {exc}")
+                    continue
+
+                if self.cache.restore_to_local(cache_key, str(target_file)):
+                    continue
+
+                if self.api.download_file(disk_id, item["path"], str(target_file)):
+                    try:
+                        self.cache.cache_local_file(cache_key, str(target_file), file_id=cache_key)
+                    except Exception as exc:
+                        print(f"Cache store skipped for {target_file}: {exc}")
 
     # ------------------------------------------------------------------ #
     # Watchdog handlers                                                    #
@@ -200,6 +227,11 @@ class RediskService:
             self.api.create_folder(disk_id, remote)
         elif os.path.exists(path):
             self.api.upload_file(disk_id, path, remote)
+            cache_key = self._cache_key(disk_id, remote)
+            try:
+                self.cache.cache_local_file(cache_key, path, file_id=cache_key)
+            except Exception as exc:
+                print(f"Cache update skipped for {path}: {exc}")
 
     def handle_deleted(self, path: str):
         disk_id, rel = self._disk_and_relative_from_path(path)
@@ -207,6 +239,11 @@ class RediskService:
             return
         remote = "/" + str(rel).replace("\\", "/")
         self.api.delete_path(disk_id, remote)
+        cache_key = self._cache_key(disk_id, remote)
+        try:
+            self.cache.evict(cache_key)
+        except Exception:
+            pass
 
     def handle_moved(self, src_path: str, dest_path: str, is_dir: bool):
         src_disk, src_rel = self._disk_and_relative_from_path(src_path)
@@ -227,6 +264,10 @@ class RediskService:
         # Fallback for cross-disk moves or failed renames
         self.handle_deleted(src_path)
         self.handle_created_or_modified(dest_path, is_dir=is_dir)
+
+    def _cache_key(self, disk_id: str, remote_path: str) -> str:
+        normalized = "/" + remote_path.strip("/")
+        return f"{disk_id}:{normalized}"
 
 
 class RediskWatchHandler(FileSystemEventHandler):
