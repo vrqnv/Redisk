@@ -121,6 +121,15 @@ class TrayController:
         )
         oauth_cfg["redirect_uri"] = redirect_uri
         save_config(cfg)
+
+        # Быстрый путь для демо: если уже есть рабочий токен, подключаем сразу
+        # и не зависим от состояния OAuth-приложения.
+        if fallback_token and self.service.connect_yandex(fallback_token):
+            self.show_notification("DiscoHack", "Яндекс.Диск подключен")
+            self.open_redisk()
+            self.rebuild_menu()
+            return
+
         if not client_id:
             self._log("Yandex OAuth client_id missing.")
             self._log(
@@ -130,9 +139,8 @@ class TrayController:
             self.show_notification(
                 "DiscoHack",
                 (
-                    "Не настроен Yandex client_id. "
-                    "Заполни oauth.yandex.client_id в config.json "
-                    "или DISCOHACK_YANDEX_CLIENT_ID."
+                    "Не настроен Yandex client_id и невалидный fallback токен. "
+                    "Проверь oauth.yandex.client_id и YANDEX_TOKEN."
                 ),
             )
             return

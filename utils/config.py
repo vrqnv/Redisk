@@ -16,7 +16,7 @@ def _default_config():
     return {
         "oauth": {
             "yandex": {
-                "client_id": "8ccbfa30fe5d4a68a3b4b1f4a8c34765",
+                "client_id": "",
                 "redirect_uri": "http://127.0.0.1:8085/callback",
             },
         },
@@ -50,11 +50,6 @@ def load_config():
         "redirect_uri",
         defaults["oauth"]["yandex"]["redirect_uri"],
     )
-    if not cfg["oauth"]["yandex"].get("client_id"):
-        cfg["oauth"]["yandex"]["client_id"] = defaults["oauth"]["yandex"][
-            "client_id"
-        ]
-        save_config(cfg)
     cfg.setdefault("disks", {})
     cfg["disks"].setdefault("yandex", defaults["disks"]["yandex"])
     cfg["disks"].setdefault("nextcloud", defaults["disks"]["nextcloud"])
