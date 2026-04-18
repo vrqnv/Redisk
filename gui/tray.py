@@ -2,6 +2,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import webbrowser
 
 from PIL import Image, ImageDraw  # type: ignore[import-not-found]
@@ -124,10 +125,14 @@ class TrayController:
 
         # Быстрый путь для демо: если уже есть рабочий токен, подключаем сразу
         # и не зависим от состояния OAuth-приложения.
-        if fallback_token and self.service.connect_yandex(fallback_token):
+        if fallback_token and self.service.connect_yandex(
+            fallback_token,
+            initial_sync=False,
+        ):
             self.show_notification("DiscoHack", "Яндекс.Диск подключен")
             self.open_redisk()
             self.rebuild_menu()
+            self._start_initial_sync("yandex")
             return
 
         if not client_id:
@@ -174,13 +179,17 @@ class TrayController:
                 "Yandex OAuth code flow failed, trying fallback token. "
                 f"error={result.error or 'timeout'}",
             )
-            if fallback_token and self.service.connect_yandex(fallback_token):
+            if fallback_token and self.service.connect_yandex(
+                fallback_token,
+                initial_sync=False,
+            ):
                 self.show_notification(
                     "DiscoHack",
                     "Яндекс.Диск подключен по fallback токену",
                 )
                 self.open_redisk()
                 self.rebuild_menu()
+                self._start_initial_sync("yandex")
                 return
             QMessageBox.critical(
                 None,
@@ -212,7 +221,7 @@ class TrayController:
             )
             return
 
-        is_connected = self.service.connect_yandex(access_token)
+        is_connected = self.service.connect_yandex(access_token, initial_sync=False)
         if not is_connected:
             QMessageBox.critical(
                 None,
@@ -224,6 +233,22 @@ class TrayController:
         self.show_notification("DiscoHack", "Яндекс.Диск подключен")
         self.open_redisk()
         self.rebuild_menu()
+        self._start_initial_sync("yandex")
+
+    def _start_initial_sync(self, disk_id: str):
+        def sync_job():
+            try:
+                self.service.pull_from_cloud(disk_id)
+                self.show_notification("DiscoHack", "Первичная синхронизация завершена")
+            except Exception as exc:
+                self._log(f"Initial sync failed for {disk_id}: {exc!r}")
+                self.show_notification(
+                    "DiscoHack",
+                    "Первичная синхронизация завершилась с ошибками",
+                )
+
+        t = threading.Thread(target=sync_job, daemon=True)
+        t.start()
 
     def connect_disk(self, disk_id: str):
         disk_title = DISK_TITLES[disk_id]
