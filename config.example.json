@@ -1,0 +1,16 @@
+{
+  "oauth": {
+    "yandex": {
+      "client_id": "b0748f301b7d451799d3c79dc69fab25",
+      "redirect_uri": "http://127.0.0.1:8085/callback"
+    }
+  },
+  "disks": {
+    "yandex": {
+      "enabled": false
+    },
+    "nextcloud": {
+      "enabled": false
+    }
+  }
+}
