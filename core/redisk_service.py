@@ -37,9 +37,8 @@ class RediskService:
         )
         self.observer.start()
 
-        for disk_id in self.get_connected_disks():
-            self.ensure_disk_local_dir(disk_id)
-            self.pull_from_cloud(disk_id)
+        # При старте ничего не подключаем автоматически:
+        # на демо/хакатоне это часто даёт ошибки сети и мешает проверить tray.
 
     def shutdown(self):
         self.observer.stop()

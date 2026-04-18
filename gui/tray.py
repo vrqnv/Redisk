@@ -6,12 +6,10 @@ import webbrowser
 
 from PIL import Image, ImageDraw  # type: ignore[import-not-found]
 from PyQt6.QtGui import QAction, QIcon  # type: ignore[import-not-found]
-from PyQt6.QtCore import QPoint  # type: ignore[import-not-found]
 from PyQt6.QtWidgets import (  # type: ignore[import-not-found]
     QApplication,
     QInputDialog,
     QLineEdit,
-    QMenu,
     QMessageBox,
     QSystemTrayIcon,
 )
@@ -35,18 +33,35 @@ class TrayController:
         self.tray_icon = tray_icon
         self.service = service
         self.notifications_enabled = True
-        self.menu = QMenu()
-        self.add_disk_action = QAction("Добавить диск")
-        self.disconnect_action = QAction("Отключить диск")
+        self.menu = self._create_menu()
+        self.add_yandex_action = QAction("Добавить Яндекс.Диск")
+        self.add_nextcloud_action = QAction("Добавить NextCloud")
+        self.disconnect_yandex_action = QAction("Отключить Яндекс.Диск")
+        self.disconnect_nextcloud_action = QAction("Отключить NextCloud")
         self.open_action = QAction("Открыть Redisk")
         self.notifications_action = QAction("Отключить уведомления")
-        self.add_disk_action.triggered.connect(self.show_add_disk_menu)
-        self.disconnect_action.triggered.connect(self.show_disconnect_menu)
+        self.add_yandex_action.triggered.connect(lambda: self.connect_disk("yandex"))
+        self.add_nextcloud_action.triggered.connect(
+            lambda: self.connect_disk("nextcloud"),
+        )
+        self.disconnect_yandex_action.triggered.connect(
+            lambda: self.disconnect_disk("yandex"),
+        )
+        self.disconnect_nextcloud_action.triggered.connect(
+            lambda: self.disconnect_disk("nextcloud"),
+        )
         self.open_action.triggered.connect(self.open_redisk)
         self.notifications_action.triggered.connect(self.toggle_notifications)
 
         self._log_path = os.path.expanduser("~/.cache/discohack/tray.log")
         os.makedirs(os.path.dirname(self._log_path), exist_ok=True)
+
+    def _create_menu(self):
+        # QMenu() иногда ведёт себя странно в разных DE,
+        # поэтому создаём его в отдельном месте.
+        from PyQt6.QtWidgets import QMenu  # type: ignore[import-not-found]
+
+        return QMenu()
 
     def show_notification(self, title: str, message: str):
         if self.notifications_enabled:
@@ -74,13 +89,6 @@ class TrayController:
             return
 
         print(f"Открыт Redisk: {mount_dir}")
-
-    def _popup_menu_near_cursor(self, menu: QMenu):
-        try:
-            pos = QPoint(QCursor.pos())  # type: ignore[name-defined]
-        except Exception:
-            pos = QPoint(0, 0)
-        menu.popup(pos)
 
     def connect_disk(self, disk_id: str):
         disk_title = DISK_TITLES[disk_id]
@@ -158,54 +166,20 @@ class TrayController:
             print("Уведомления отключены")
             self.notifications_action.setText("Включить уведомления")
 
-    def show_disconnect_menu(self):
-        connected_disks = self.service.get_connected_disks()
-        menu = QMenu()
-        if not connected_disks:
-            disabled_action = QAction("Нет подключенных дисков")
-            disabled_action.setEnabled(False)
-            menu.addAction(disabled_action)
-        else:
-            for disk_id in connected_disks:
-                action = QAction(f"Отключить {DISK_TITLES[disk_id]}")
-                action.triggered.connect(
-                    lambda _, d=disk_id: self.disconnect_disk(d),
-                )
-                menu.addAction(action)
-        menu.popup(QCursor.pos())  # type: ignore[name-defined]
-
-    def show_add_disk_menu(self):
-        connected_disks = set(self.service.get_connected_disks())
-        available = [d for d in ("yandex", "nextcloud") if d not in connected_disks]
-        menu = QMenu()
-        if not available:
-            disabled_action = QAction("Все диски уже подключены")
-            disabled_action.setEnabled(False)
-            menu.addAction(disabled_action)
-        else:
-            for disk_id in available:
-                action = QAction(DISK_TITLES[disk_id])
-                action.triggered.connect(
-                    lambda _, d=disk_id: self.connect_disk(d),
-                )
-                menu.addAction(action)
-        menu.popup(QCursor.pos())  # type: ignore[name-defined]
-
     def rebuild_menu(self):
         self.menu.clear()
         try:
             connected_disks = self.service.get_connected_disks()
-            if connected_disks:
-                if len(connected_disks) == 1:
-                    disk_id = connected_disks[0]
-                    self.disconnect_action.setText(
-                        f"Отключить {DISK_TITLES[disk_id]}",
-                    )
-                else:
-                    self.disconnect_action.setText("Отключить диск")
-                self.menu.addAction(self.disconnect_action)
+            if "yandex" in connected_disks:
+                self.menu.addAction(self.disconnect_yandex_action)
+            if "nextcloud" in connected_disks:
+                self.menu.addAction(self.disconnect_nextcloud_action)
 
-            self.menu.addAction(self.add_disk_action)
+            connected = set(connected_disks)
+            if "yandex" not in connected:
+                self.menu.addAction(self.add_yandex_action)
+            if "nextcloud" not in connected:
+                self.menu.addAction(self.add_nextcloud_action)
             self.menu.addAction(self.open_action)
             self.menu.addAction(self.notifications_action)
             self.menu.addSeparator()
