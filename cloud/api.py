@@ -6,29 +6,14 @@ from urllib.parse import urlsplit
 import yadisk  # type: ignore[import-not-found]
 from webdav3.client import Client as WebDAVClient  # type: ignore[import-untyped]
 
-from cloud.config import NEXTCLOUD_CONFIG, YANDEX_TOKEN
-
-
 class CloudAPI:
     def __init__(self, config: dict | None = None):
         self.yandex: Any | None = None
         self.nextcloud: Any | None = None
         self.config = config or {}
 
-        yandex_token = (
-            self.config.get("disks", {}).get("yandex", {}).get("token")
-            or YANDEX_TOKEN
-        )
-        nextcloud_cfg = (
-            self.config.get("disks", {}).get("nextcloud")
-            or NEXTCLOUD_CONFIG
-            or {}
-        )
-
-        if yandex_token:
-            self.connect_yandex(yandex_token)
-        if nextcloud_cfg:
-            self.connect_nextcloud(nextcloud_cfg)
+        # Не автоподключаемся при старте.
+        # Подключение происходит только когда пользователь явно вводит данные в tray.
 
     @staticmethod
     def _normalize_remote_path(path: str) -> str:
